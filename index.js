@@ -1,27 +1,6 @@
-// ================= KEEP ALIVE SERVER =================
-const express = require('express');
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.get('/', (req, res) => {
-    res.send('🤖 Bot is running!');
-});
-
-app.get('/ping', (req, res) => {
-    res.json({
-        status: 'alive',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime()
-    });
-});
-
-app.listen(PORT, () => {
-    console.log(`🌐 Keep-alive server running on port ${PORT}`);
-});
-// =====================================================
-
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
+const fs = require("fs");
 
 const { loadData, saveData, nowTime } = require("./utils");
 
@@ -41,12 +20,31 @@ const bot = new TelegramBot(process.env.BOT_TOKEN, {
 let data = loadData();
 
 // ================= MULTIPLE OWNERS CONFIGURATION =================
-const OWNER_IDS = process.env.OWNER_IDS 
-    ? process.env.OWNER_IDS.split(',').map(id => id.trim())
-    : [process.env.OWNER_ID];
+// Load owners from a separate file for dynamic management
+const OWNERS_FILE = './owners.json';
+
+function loadOwners() {
+    if (!fs.existsSync(OWNERS_FILE)) {
+        const defaultOwners = [process.env.OWNER_ID];
+        fs.writeFileSync(OWNERS_FILE, JSON.stringify(defaultOwners, null, 2));
+        return defaultOwners;
+    }
+    return JSON.parse(fs.readFileSync(OWNERS_FILE, "utf8"));
+}
+
+function saveOwners(owners) {
+    fs.writeFileSync(OWNERS_FILE, JSON.stringify(owners, null, 2));
+}
+
+let OWNER_IDS = loadOwners();
 
 function isOwner(userId) {
     return OWNER_IDS.includes(String(userId));
+}
+
+// Function to refresh owners list
+function refreshOwners() {
+    OWNER_IDS = loadOwners();
 }
 
 console.log("机器人运行中...");
@@ -78,7 +76,7 @@ function getAdminMenu() {
                 [{ text: "✅ 开始机器人" }, { text: "🛑 停止机器人" }],
                 [{ text: "⚙️ 设置费率" }, { text: "💱 设置汇率" }],
                 [{ text: "💰 更新已下发" }, { text: "🗑️ 清空数据" }],
-                [{ text: "👥 管理员列表" }, { text: "❓ 帮助" }]
+                [{ text: "👥 管理员管理" }, { text: "❓ 帮助" }]
             ],
             resize_keyboard: true,
             one_time_keyboard: false
@@ -102,7 +100,7 @@ function getInlineButtons() {
                     { text: "💱 设置汇率", callback_data: "set_rate" }
                 ],
                 [{ text: "💰 更新已下发", callback_data: "set_paid" }],
-                [{ text: "👥 管理员列表", callback_data: "owners" }]
+                [{ text: "👥 管理员管理", callback_data: "owners" }]
             ]
         }
     };
@@ -211,17 +209,80 @@ bot.onText(/\/clear/, (msg) => {
     });
 });
 
+/* ================= 添加管理员 ================= */
+bot.onText(/\/addadmin (\d+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    if (!isOwner(msg.from.id)) {
+        return bot.sendMessage(chatId, "❌ 您没有权限使用此命令");
+    }
+
+    const newAdminId = match[1];
+    
+    // Check if already an admin
+    if (OWNER_IDS.includes(newAdminId)) {
+        return bot.sendMessage(chatId, `❌ 用户 ${newAdminId} 已经是管理员了`, getAdminMenu());
+    }
+
+    // Add new admin
+    OWNER_IDS.push(newAdminId);
+    saveOwners(OWNER_IDS);
+    refreshOwners();
+
+    bot.sendMessage(chatId, `✅ *管理员已添加！*\n\n用户ID: \`${newAdminId}\`\n当前管理员总数: ${OWNER_IDS.length}`, { 
+        parse_mode: "Markdown",
+        ...getAdminMenu()
+    });
+});
+
+/* ================= 移除管理员 ================= */
+bot.onText(/\/removeadmin (\d+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    
+    // Only master owner (from .env) can remove admins
+    if (String(msg.from.id) !== process.env.OWNER_ID) {
+        return bot.sendMessage(chatId, "❌ 只有超级管理员可以移除管理员");
+    }
+
+    const removeAdminId = match[1];
+    
+    // Cannot remove the master owner
+    if (removeAdminId === process.env.OWNER_ID) {
+        return bot.sendMessage(chatId, "❌ 不能移除超级管理员", getAdminMenu());
+    }
+
+    // Check if user is an admin
+    if (!OWNER_IDS.includes(removeAdminId)) {
+        return bot.sendMessage(chatId, `❌ 用户 ${removeAdminId} 不是管理员`, getAdminMenu());
+    }
+
+    // Remove admin
+    OWNER_IDS = OWNER_IDS.filter(id => id !== removeAdminId);
+    saveOwners(OWNER_IDS);
+    refreshOwners();
+
+    bot.sendMessage(chatId, `✅ *管理员已移除！*\n\n用户ID: \`${removeAdminId}\`\n当前管理员总数: ${OWNER_IDS.length}`, { 
+        parse_mode: "Markdown",
+        ...getAdminMenu()
+    });
+});
+
 /* ================= 查看管理员列表 ================= */
 bot.onText(/\/owners/, (msg) => {
     const chatId = msg.chat.id;
     if (!isOwner(msg.from.id)) return;
 
+    refreshOwners(); // Refresh the list
+    
     let ownerList = "👥 *管理员列表*\n\n";
     OWNER_IDS.forEach((id, index) => {
-        const isCurrent = String(msg.from.id) === id ? " 👈 (您)" : "";
-        ownerList += `${index + 1}. \`${id}\`${isCurrent}\n`;
+        const isCurrent = String(msg.from.id) === id ? "(您)" : "";
+        const isMaster = id === process.env.OWNER_ID ? "(超级管理员)" : "";
+        ownerList += `${index + 1}. \`${id}\`${isCurrent}${isMaster}\n`;
     });
     ownerList += `\n共 ${OWNER_IDS.length} 位管理员`;
+    ownerList += `\n\n📌 *管理命令：*
+/addadmin [ID] - 添加管理员
+/removeadmin [ID] - 移除管理员（仅超级管理员）`;
 
     bot.sendMessage(chatId, ownerList, { 
         parse_mode: "Markdown",
@@ -278,6 +339,8 @@ bot.onText(/\/status/, (msg) => {
 /paid [数字] - 更新已下发
 /clear - 清空所有数据
 /owners - 查看管理员列表
+/addadmin [ID] - 添加管理员
+/removeadmin [ID] - 移除管理员（仅超级管理员）
 /help - 显示帮助`;
 
     bot.sendMessage(chatId, statusMsg, { 
@@ -303,6 +366,8 @@ bot.onText(/\/help/, (msg) => {
 /paid [数字] - 更新已下发金额
 /clear - 清空所有交易数据
 /owners - 查看管理员列表
+/addadmin [ID] - 添加管理员
+/removeadmin [ID] - 移除管理员（仅超级管理员）
 /help - 显示此帮助
 
 📝 *存款录入：*
@@ -319,8 +384,10 @@ bot.onText(/\/help/, (msg) => {
 • 报表显示最近5笔存款
 • 费用计算在总存款上
 
-👥 *管理员：*
-${OWNER_IDS.length} 位管理员已配置
+👥 *管理员管理：*
+• 超级管理员（.env中的OWNER_ID）
+• 管理员可以通过命令添加/移除
+• 只有超级管理员可以移除管理员
 
 🔐 *安全提醒：*
 只有管理员可以使用此机器人`;
@@ -364,10 +431,10 @@ bot.on("message", (msg) => {
             return bot.sendMessage(chatId, "💡 请发送：/paid [数字]\n例如：/paid 100", getAdminMenu());
         case "🗑️ 清空数据":
             return handleClear(chatId);
-        case "👥 管理员列表":
+        case "👥 管理员管理":
             return handleOwners(chatId);
         case "❓ 帮助":
-            return bot.sendMessage(chatId, "🤖 *机器人使用帮助*\n\n📌 发送数字记录存款：\n100 或 +100\n\n❌ 不接受提款\n\n更多命令请使用 /help", { parse_mode: "Markdown", ...getAdminMenu() });
+            return bot.sendMessage(chatId, "🤖 *机器人使用帮助*\n\n📌 发送数字记录存款：\n100 或 +100\n\n❌ 不接受提款\n\n使用 /help 查看完整命令", { parse_mode: "Markdown", ...getAdminMenu() });
     }
     
     // 处理交易录入
@@ -474,6 +541,7 @@ function handleStop(chatId) {
 }
 
 function handleStatus(chatId) {
+    refreshOwners();
     const totalDeposits = data.transactions.filter(t => t.type === "deposit").length;
     const totalAmount = data.transactions.reduce((sum, t) => sum + t.amount, 0);
     
@@ -505,11 +573,17 @@ function handleClear(chatId) {
 }
 
 function handleOwners(chatId) {
+    refreshOwners();
     let ownerList = "👥 *管理员列表*\n\n";
     OWNER_IDS.forEach((id, index) => {
-        ownerList += `${index + 1}. \`${id}\`\n`;
+        const isCurrent = String(chatId).includes(id) ? " 👈 (您)" : "";
+        const isMaster = id === process.env.OWNER_ID ? " 👑 (超级管理员)" : "";
+        ownerList += `${index + 1}. \`${id}\`${isCurrent}${isMaster}\n`;
     });
     ownerList += `\n共 ${OWNER_IDS.length} 位管理员`;
+    ownerList += `\n\n📌 *管理命令：*
+/addadmin [ID] - 添加管理员
+/removeadmin [ID] - 移除管理员（仅超级管理员）`;
 
     bot.sendMessage(chatId, ownerList, { 
         parse_mode: "Markdown",
@@ -586,4 +660,3 @@ process.on('unhandledRejection', (reason, promise) => {
 console.log("机器人已启动，增强错误处理已启用！");
 console.log("当前管理员:", OWNER_IDS);
 console.log("模式: 仅存款");
-console.log(`🌐 Keep-alive server running on port ${PORT}`);
