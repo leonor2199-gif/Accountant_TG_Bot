@@ -2,16 +2,32 @@ require("dotenv").config();
 
 const express = require("express");
 const app = express();
+const PORT = process.env.PORT || 10000;
+
+// ================= EXPRESS SERVER (Keep-Alive) =================
+app.get("/", (req, res) => {
+    res.send("🤖 Telegram Bot is running!");
+});
+
+app.get("/ping", (req, res) => {
+    res.json({
+        status: "alive",
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        owners: OWNER_IDS ? OWNER_IDS.length : 0
+    });
+});
+
+// Start the Express server - MUST bind to 0.0.0.0
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🌐 Keep-alive server running on port ${PORT}`);
+});
+// ==============================================================
 
 const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs");
 
 const { loadData, saveData, nowTime } = require("./utils");
-const PORT = process.env.PORT || 3000;
-
-app.get("/", (req, res) => {
-    res.send("Telegram Bot is running!");
-});
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { 
     polling: {
@@ -284,8 +300,8 @@ bot.onText(/\/owners/, (msg) => {
     
     let ownerList = "👥 *管理员列表*\n\n";
     OWNER_IDS.forEach((id, index) => {
-        const isCurrent = String(msg.from.id) === id ? "(您)" : "";
-        const isMaster = id === process.env.OWNER_ID ? "(超级管理员)" : "";
+        const isCurrent = String(msg.from.id) === id ? " (您)" : "";
+        const isMaster = id === process.env.OWNER_ID ? " (超级管理员)" : "";
         ownerList += `${index + 1}. \`${id}\`${isCurrent}${isMaster}\n`;
     });
     ownerList += `\n共 ${OWNER_IDS.length} 位管理员`;
