@@ -1,8 +1,15 @@
 const fs = require("fs");
-const moment = require("moment");
 
 function nowTime() {
-    return moment().format("HH:mm:ss");
+    // Get current time in Mexico timezone (UTC-6) without moment-timezone
+    const now = new Date();
+    const mexicoTime = new Date(now.toLocaleString("en-US", { timeZone: "America/Mexico_City" }));
+    
+    const hours = String(mexicoTime.getHours()).padStart(2, '0');
+    const minutes = String(mexicoTime.getMinutes()).padStart(2, '0');
+    const seconds = String(mexicoTime.getSeconds()).padStart(2, '0');
+    
+    return `${hours}:${minutes}:${seconds}`;
 }
 
 function loadData() {
