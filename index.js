@@ -146,8 +146,9 @@ bot.onText(/\/start/, (msg) => {
     const welcomeMsg = `✅ *机器人已启动成功！*
 
 📌 使用说明：
-• 发送数字记录存款
-• 例如: 100 或 +100
+• 发送 +数字 记录存款
+• 例如: +100 或 +100.5
+• 必须包含 + 符号
 • 只接受存款，不接受提款
 
 👥 当前管理员：${OWNER_IDS.length} 位
@@ -396,11 +397,12 @@ bot.onText(/\/help/, (msg) => {
 /help - 显示此帮助
 
 📝 *存款录入：*
-发送数字记录存款：
-100 - 存款100
+发送 +数字 记录存款：
 +100 - 存款100
++100.5 - 存款100.5
 
 ⚠️ *重要：*
+• 必须包含 + 符号
 • 只接受存款，不接受提款
 • 负数和提款请求将被忽略
 
@@ -459,29 +461,35 @@ bot.on("message", (msg) => {
         case "👥 管理员管理":
             return handleOwners(chatId);
         case "❓ 帮助":
-            return bot.sendMessage(chatId, "🤖 *机器人使用帮助*\n\n📌 发送数字记录存款：\n100 或 +100\n\n❌ 不接受提款\n\n使用 /help 查看完整命令", { parse_mode: "Markdown", ...getAdminMenu() });
+            return bot.sendMessage(chatId, "🤖 *机器人使用帮助*\n\n📌 发送 +数字 记录存款：\n+100 或 +100.5\n\n❌ 不接受提款\n\n使用 /help 查看完整命令", { parse_mode: "Markdown", ...getAdminMenu() });
     }
     
-    // 处理交易录入
+    // ========== MODIFIED: Only process messages with "+" ==========
+    // Check if message contains "+" anywhere
+    if (!msg.text.includes('+')) {
+        // Just ignore the message without any response
+        return;
+    }
+    
+    // Extract the number after the "+" sign
+    // This matches +100, +100.5, + 100, + 100.5
+    const match = msg.text.match(/\+[\s]*([0-9.]+)/);
+    
+    if (!match) {
+        // If "+" is present but no number follows, ignore silently
+        return;
+    }
+    
+    const amount = Number(match[1]);
+    
+    if (isNaN(amount) || amount <= 0) {
+        // If amount is invalid or <= 0, ignore silently
+        return;
+    }
+    // ========== END MODIFICATION ==========
+
     if (!data.running) {
         return bot.sendMessage(chatId, "⛔ 机器人已停止。请点击「✅ 开始机器人」启动。", getAdminMenu());
-    }
-
-    // 提取数字（支持带+号或不带+号）
-    const match = msg.text.match(/(\d+)/);
-    if (!match) {
-        return bot.sendMessage(chatId, "❌ 请发送有效数字\n示例：100 或 +100", getAdminMenu());
-    }
-
-    const amount = Number(match[1]);
-
-    if (amount === 0) {
-        return bot.sendMessage(chatId, "❌ 金额不能为0", getAdminMenu());
-    }
-
-    // 检查是否是提款（包含负号）
-    if (msg.text.includes('-')) {
-        return bot.sendMessage(chatId, "❌ 本机器人只接受存款，不接受提款", getAdminMenu());
     }
 
     // 只记录存款
@@ -550,7 +558,7 @@ function handleStart(chatId) {
     data.running = true;
     data.transactions = [];
     saveData(data);
-    bot.sendMessage(chatId, "✅ *机器人已启动成功！*\n\n可以开始记录存款了", { 
+    bot.sendMessage(chatId, "✅ *机器人已启动成功！*\n\n可以开始记录存款了\n\n📌 使用格式：+100 或 +100.5", { 
         parse_mode: "Markdown",
         ...getAdminMenu()
     });
@@ -684,4 +692,4 @@ process.on('unhandledRejection', (reason, promise) => {
 
 console.log("机器人已启动，增强错误处理已启用！");
 console.log("当前管理员:", OWNER_IDS);
-console.log("模式: 仅存款");
+console.log("模式: 仅接受 + 符号开头的存款");
